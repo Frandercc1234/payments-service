@@ -64,7 +64,7 @@ No contienen reglas de negocio.
 **Dónde.**
 - `service/PaymentService.java`: crea el pago, mueve saldos y escribe el ledger.
 - `service/IdempotentPaymentService.java`: envuelve la creación con la idempotencia.
-- `service/WebhookService.java`: firma → evento → efecto sobre el pago.
+- `service/WebhookService.java`: aplica un evento ya autenticado → efecto sobre el pago (la firma la verifica la capa web).
 - `service/AccountService.java`, `service/AccountLocks.java`, `service/SignatureVerifier.java`.
 
 **Cómo se compara con NestJS.** `@Service` ≈ `@Injectable()`. La inyección por constructor es idéntica en espíritu; la diferencia es
@@ -86,8 +86,9 @@ que Spring descubre los beans escaneando paquetes (no declarás `providers` en u
    (`request.toCommand()` de ida, `PaymentResponse.from(snapshot)` de vuelta), de modo que la dependencia ahora apunta en un solo
    sentido: `web → service → domain`. El snapshot conserva los mismos nombres de campo que el JSON ya guardado en
    `idempotency_keys`, así que las claves existentes siguen leyéndose y no hizo falta migración. Lo comprobé con las 70 pruebas
-   de integración sin cambiarlas. Lo que sigue pendiente: `WebhookService` importa `WebhookDtos` de `web.dto`; es el mismo defecto
-   y se corrige con el mismo patrón.
+   de integración sin cambiarlas. `WebhookService` tenía el mismo defecto (importaba `WebhookDtos`) y se corrigió igual: ahora
+   recibe un `ProviderEventCommand` y devuelve un `WebhookOutcome`; la firma y el parseo pasaron a `web/WebhookRequestReader`.
+   Resultado verificable: ninguna clase de `service/` importa nada de `web`.
 
 ---
 
@@ -129,7 +130,7 @@ que Spring descubre los beans escaneando paquetes (no declarás `providers` en u
 **Dónde.**
 - `service/PaymentService.java:32`: crear pago (débito, crédito, pago, 2 asientos: todo o nada).
 - `service/IdempotentPaymentService.java:39`: reclamar la clave + crear el pago en la misma transacción.
-- `service/WebhookService.java:52`: registrar el evento + cambiar el estado + reversión.
+- `service/WebhookService.java:37`: registrar el evento + cambiar el estado + reversión.
 - `service/AccountLocks.java:28`: `Propagation.MANDATORY`, exige que ya exista una transacción abierta.
 
 **Cómo se compara con NestJS.** En Nest no hay un decorador estándar equivalente: hacés `dataSource.transaction(async manager => …)`
@@ -226,7 +227,8 @@ El servicio recalcula la firma y rechaza con 401 si no coincide; nada del cuerpo
 **Dónde.**
 - `service/SignatureVerifier.java`: cálculo del HMAC (`Mac`) y comparación en tiempo constante (línea 40, `MessageDigest.isEqual`).
 - `web/WebhookController.java`: recibe `@RequestBody byte[]` (bytes crudos).
-- `service/WebhookService.java:52-`: orden firma → parseo → transacción.
+- `web/WebhookRequestReader.java`: orden firma → parseo → validación, **antes** de abrir ninguna transacción.
+- `service/WebhookService.java:37`: la transacción (bloqueo del pago, registro del evento, efecto).
 - `config/WebhookProperties.java`: el secreto, desde `app.webhook.secret` / variable `WEBHOOK_SECRET`.
 - Prueba: `src/test/java/cr/portfolio/payments/WebhookIntegrationTest.java` (calcula la firma con `javax.crypto` por su cuenta,
   sin reutilizar el código bajo prueba).

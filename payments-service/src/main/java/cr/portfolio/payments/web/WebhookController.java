@@ -18,9 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/webhooks")
 public class WebhookController {
 
+    private final WebhookRequestReader reader;
     private final WebhookService webhooks;
 
-    public WebhookController(WebhookService webhooks) {
+    public WebhookController(WebhookRequestReader reader, WebhookService webhooks) {
+        this.reader = reader;
         this.webhooks = webhooks;
     }
 
@@ -37,6 +39,7 @@ public class WebhookController {
     @PostMapping("/provider")
     public WebhookAck provider(@RequestBody byte[] body,
             @RequestHeader(value = "X-Signature", required = false) String signature) {
-        return webhooks.handle(body, signature);
+        var event = reader.read(body, signature);       // firma, parseo y validación (sin transacción)
+        return WebhookAck.from(webhooks.handle(event));  // efecto de negocio (transaccional)
     }
 }

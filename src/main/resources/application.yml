@@ -11,6 +11,11 @@ spring:
       ddl-auto: validate         # Flyway crea el esquema; Hibernate solo lo verifica
   flyway:
     enabled: true
+  jackson:
+    deserialization:
+      # Por defecto Jackson acepta 10.5 en un campo long y lo trunca a 10: en dinero eso es inaceptable.
+      accept-float-as-int: false
+      fail-on-unknown-properties: true
 
 management:
   endpoints:

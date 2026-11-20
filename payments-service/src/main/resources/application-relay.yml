@@ -1,0 +1,11 @@
+# Perfil del proceso outbox-relay: la misma imagen que la API, pero sin servidor web y publicando el outbox.
+spring:
+  main:
+    web-application-type: none
+  flyway:
+    enabled: false          # el esquema lo gestiona la API; el relay solo lo usa
+
+app:
+  outbox:
+    relay:
+      enabled: true

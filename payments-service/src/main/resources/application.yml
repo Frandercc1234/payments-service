@@ -17,7 +17,20 @@ spring:
       accept-float-as-int: false
       fail-on-unknown-properties: true
 
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    publisher-confirm-type: correlated   # el broker confirma cada mensaje (ack/nack)
+    publisher-returns: true              # el broker devuelve los mensajes que no llegan a ninguna cola
+    template:
+      mandatory: true                    # sin cola enlazada = devuelto, no descartado en silencio
+
 management:
+  health:
+    rabbit:
+      enabled: false   # la API no usa RabbitMQ (solo el relay): que un broker caído no ponga la API en DOWN
   endpoints:
     web:
       exposure:
@@ -31,3 +44,10 @@ management:
 app:
   webhook:
     secret: ${WEBHOOK_SECRET:dev-only-secret-change-me}
+  outbox:
+    exchange: payments.events
+    batch-size: 50
+    confirm-timeout: 5s     # cuánto espera la confirmación del broker antes de dejar el evento pendiente
+    poll-interval: 500ms
+    relay:
+      enabled: false        # solo el proceso "relay" (perfil relay) publica; la API nunca lo hace

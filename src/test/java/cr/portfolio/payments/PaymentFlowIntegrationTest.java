@@ -9,16 +9,11 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.web.client.TestRestTemplate;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 class PaymentFlowIntegrationTest extends AbstractIntegrationTest {
 
-    @Autowired TestRestTemplate rest;
     @Autowired AccountRepository accounts;
     @Autowired JdbcTemplate jdbc;
 
@@ -99,9 +94,9 @@ class PaymentFlowIntegrationTest extends AbstractIntegrationTest {
     void unknownAccountReturns404() {
         var from = account(Currency.CRC, 1_000);
 
-        var response = rest.postForEntity("/payments",
+        var response = postPayment(
                 Map.of("sourceAccountId", from.getId(), "destinationAccountId", UUID.randomUUID(),
-                        "amount", 10, "currency", "CRC"), Map.class);
+                        "amount", 10, "currency", "CRC"), UUID.randomUUID().toString());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(balanceOf(from)).isEqualTo(1_000);
@@ -129,12 +124,10 @@ class PaymentFlowIntegrationTest extends AbstractIntegrationTest {
     void decimalAmountIsRejectedInsteadOfTruncated() {
         var a = account(Currency.CRC, 1_000);
         var b = account(Currency.CRC, 0);
-        var headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
         var json = "{\"sourceAccountId\":\"%s\",\"destinationAccountId\":\"%s\",\"amount\":10.5,\"currency\":\"CRC\"}"
                 .formatted(a.getId(), b.getId());
 
-        var response = rest.postForEntity("/payments", new HttpEntity<>(json, headers), Map.class);
+        var response = postPayment(json, UUID.randomUUID().toString());
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(balanceOf(a)).isEqualTo(1_000);
@@ -157,8 +150,6 @@ class PaymentFlowIntegrationTest extends AbstractIntegrationTest {
     }
 
     private org.springframework.http.ResponseEntity<Map> pay(Account from, Account to, long amount, String currency) {
-        return rest.postForEntity("/payments",
-                Map.of("sourceAccountId", from.getId(), "destinationAccountId", to.getId(),
-                        "amount", amount, "currency", currency), Map.class);
+        return postPayment(paymentBody(from, to, amount, currency), UUID.randomUUID().toString());
     }
 }

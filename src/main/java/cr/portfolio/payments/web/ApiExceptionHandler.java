@@ -3,7 +3,9 @@ package cr.portfolio.payments.web;
 import cr.portfolio.payments.domain.CurrencyMismatchException;
 import cr.portfolio.payments.domain.InsufficientFundsException;
 import cr.portfolio.payments.domain.InvalidStateTransitionException;
+import cr.portfolio.payments.service.IdempotencyConflictException;
 import cr.portfolio.payments.service.ResourceNotFoundException;
+import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +48,16 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(InvalidStateTransitionException.class)
     ProblemDetail invalidTransition(InvalidStateTransitionException ex) {
         return problem(HttpStatus.CONFLICT, "invalid-state-transition", "Transición de estado inválida", ex.getMessage());
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    ProblemDetail idempotencyConflict(IdempotencyConflictException ex) {
+        return problem(HttpStatus.CONFLICT, "idempotency-key-reused", "Idempotency-Key reutilizada", ex.getMessage());
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    ProblemDetail constraintViolation(ConstraintViolationException ex) {
+        return problem(HttpStatus.BAD_REQUEST, "validation-error", "Datos inválidos", ex.getMessage());
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

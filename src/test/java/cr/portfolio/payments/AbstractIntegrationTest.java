@@ -1,6 +1,15 @@
 package cr.portfolio.payments;
 
+import cr.portfolio.payments.domain.Account;
+import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -21,6 +30,24 @@ public abstract class AbstractIntegrationTest {
 
     static {
         POSTGRES.start();
+    }
+
+    @Autowired
+    protected TestRestTemplate rest;
+
+    /** POST /payments con el header Idempotency-Key. El cuerpo puede ser un Map o un JSON ya armado (String). */
+    protected ResponseEntity<Map> postPayment(Object body, String idempotencyKey) {
+        var headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        if (idempotencyKey != null) {
+            headers.set("Idempotency-Key", idempotencyKey);
+        }
+        return rest.exchange("/payments", HttpMethod.POST, new HttpEntity<>(body, headers), Map.class);
+    }
+
+    protected static Map<String, Object> paymentBody(Account from, Account to, long amount, String currency) {
+        return Map.of("sourceAccountId", from.getId(), "destinationAccountId", to.getId(),
+                "amount", amount, "currency", currency);
     }
 
     @DynamicPropertySource

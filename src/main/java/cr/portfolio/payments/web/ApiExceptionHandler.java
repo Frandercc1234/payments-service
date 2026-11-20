@@ -4,6 +4,7 @@ import cr.portfolio.payments.domain.CurrencyMismatchException;
 import cr.portfolio.payments.domain.InsufficientFundsException;
 import cr.portfolio.payments.domain.InvalidStateTransitionException;
 import cr.portfolio.payments.service.IdempotencyConflictException;
+import cr.portfolio.payments.service.InvalidSignatureException;
 import cr.portfolio.payments.service.ResourceNotFoundException;
 import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
@@ -53,6 +54,11 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(IdempotencyConflictException.class)
     ProblemDetail idempotencyConflict(IdempotencyConflictException ex) {
         return problem(HttpStatus.CONFLICT, "idempotency-key-reused", "Idempotency-Key reutilizada", ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidSignatureException.class)
+    ProblemDetail invalidSignature(InvalidSignatureException ex) {
+        return problem(HttpStatus.UNAUTHORIZED, "invalid-signature", "Firma inválida", ex.getMessage());
     }
 
     @ExceptionHandler(ConstraintViolationException.class)

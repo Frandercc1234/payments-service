@@ -111,6 +111,7 @@ El secreto de desarrollo viene de `.env.example` (copiarlo a `.env` para cambiar
 ### Pruebas
 
 ```bash
+cd payments-service
 ./mvnw verify     # 70 pruebas; las de integración levantan PostgreSQL real con Testcontainers (requiere Docker)
 ```
 
@@ -212,13 +213,16 @@ Esto es un **proyecto de portafolio**, no un sistema listo para producción. Sin
 ## Estructura
 
 ```
-src/main/java/cr/portfolio/payments/
-  domain/       Money, Account, Payment, PaymentStatus, LedgerEntry, … (reglas de negocio)
-  repository/   interfaces de Spring Data JPA (+ consultas con bloqueo)
-  service/      PaymentService, IdempotentPaymentService, WebhookService, AccountLocks, SignatureVerifier
-  web/          controllers, DTOs y ApiExceptionHandler (ProblemDetail)
-  config/       propiedades del webhook y OpenAPI
-src/main/resources/db/migration/   migraciones Flyway
-src/test/java/…                    pruebas unitarias y de integración (Testcontainers)
+docker-compose.yml                 orquesta los servicios (hoy: payments-service + PostgreSQL)
+.env.example                       valores de desarrollo
 docs/guia-de-estudio.md            guía para entender y explicar cada pieza (con comparación con NestJS)
+payments-service/                  proyecto Maven independiente (Dockerfile y mvnw propios)
+  src/main/java/cr/portfolio/payments/
+    domain/       Money, Account, Payment, PaymentStatus, LedgerEntry, … (reglas de negocio)
+    repository/   interfaces de Spring Data JPA (+ consultas con bloqueo)
+    service/      PaymentService, IdempotentPaymentService, WebhookService, AccountLocks, SignatureVerifier
+    web/          controllers, DTOs y ApiExceptionHandler (ProblemDetail)
+    config/       propiedades del webhook y OpenAPI
+  src/main/resources/db/migration/   migraciones Flyway
+  src/test/java/…                    pruebas unitarias y de integración (Testcontainers)
 ```

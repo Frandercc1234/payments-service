@@ -16,9 +16,11 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
+          cache-dependency-path: payments-service/pom.xml
 
       # Testcontainers usa el Docker que ya trae el runner de GitHub: PostgreSQL real, no un mock.
       - name: Compilar y correr pruebas
+        working-directory: payments-service
         run: ./mvnw -B verify
 
       - name: Subir reportes de pruebas si fallan
@@ -26,7 +28,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: surefire-reports
-          path: target/surefire-reports
+          path: payments-service/target/surefire-reports
 
   docker-image:
     name: Imagen Docker y arranque con Compose

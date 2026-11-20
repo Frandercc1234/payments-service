@@ -3,7 +3,8 @@
 Guía para entender y poder **explicar en una entrevista** cada pieza del proyecto. Para cada una: qué hace, dónde está,
 cómo se compara con NestJS y preguntas de entrevista con respuesta.
 
-> Convención: las rutas son relativas a `src/main/java/cr/portfolio/payments/` salvo que se indique otra cosa.
+> Convención: el código vive en la carpeta `payments-service/`. Las rutas son relativas a
+> `payments-service/src/main/java/cr/portfolio/payments/`; las que empiezan con `src/` son relativas a `payments-service/`.
 > Los números de línea son del momento de escribir esta guía; si el archivo cambió, buscá el nombre del método.
 
 ## Mapa mental rápido (NestJS → Spring)

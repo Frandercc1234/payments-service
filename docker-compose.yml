@@ -16,7 +16,7 @@ services:
       retries: 10
 
   api:
-    build: .
+    build: ./payments-service
     depends_on:
       postgres:
         condition: service_healthy      # la API espera a que PostgreSQL acepte conexiones

@@ -77,9 +77,16 @@ que Spring descubre los beans escaneando paquetes (no declarás `providers` en u
 2. *¿Por qué `IdempotentPaymentService` llama a `PaymentService` en vez de duplicar la lógica?*
    Separa dos responsabilidades: "cómo se hace un pago" y "cómo se evita repetirlo". Como ambos métodos son `@Transactional` y el
    segundo se une a la transacción del primero, o queda todo (clave + pago + ledger) o no queda nada.
-3. *¿Hay una dependencia que no te gusta?*
-   Sí, honestamente: `IdempotentPaymentService` importa `CreatePaymentRequest` de `web.dto`, o sea que `service` depende de `web`.
-   Lo correcto sería un comando propio del servicio. Es un compromiso de tamaño que reconozco.
+3. *¿Qué estaba mal en tu arquitectura y cómo lo corregiste?*
+   `IdempotentPaymentService` (capa `service`) importaba `CreatePaymentRequest` y `PaymentResponse` de `web.dto`: el servicio
+   dependía de la capa web, así que cambiar el contrato HTTP obligaba a tocar la lógica de negocio, y el servicio no se podía
+   reutilizar (otro endpoint, un job) sin arrastrar los DTO. Lo corregí así: el servicio ahora recibe un `CreatePaymentCommand`
+   (con un `Money` del dominio) y devuelve un `PaymentSnapshot`, ambos definidos en `service/`. El controlador hace el mapeo
+   (`request.toCommand()` de ida, `PaymentResponse.from(snapshot)` de vuelta), de modo que la dependencia ahora apunta en un solo
+   sentido: `web → service → domain`. El snapshot conserva los mismos nombres de campo que el JSON ya guardado en
+   `idempotency_keys`, así que las claves existentes siguen leyéndose y no hizo falta migración. Lo comprobé con las 70 pruebas
+   de integración sin cambiarlas. Lo que sigue pendiente: `WebhookService` importa `WebhookDtos` de `web.dto`; es el mismo defecto
+   y se corrige con el mismo patrón.
 
 ---
 
@@ -120,7 +127,7 @@ que Spring descubre los beans escaneando paquetes (no declarás `providers` en u
 
 **Dónde.**
 - `service/PaymentService.java:32`: crear pago (débito, crédito, pago, 2 asientos: todo o nada).
-- `service/IdempotentPaymentService.java:41`: reclamar la clave + crear el pago en la misma transacción.
+- `service/IdempotentPaymentService.java:39`: reclamar la clave + crear el pago en la misma transacción.
 - `service/WebhookService.java:52`: registrar el evento + cambiar el estado + reversión.
 - `service/AccountLocks.java:28`: `Propagation.MANDATORY`, exige que ya exista una transacción abierta.
 
@@ -185,7 +192,7 @@ instancias (o `await` entre lectura y escritura) el problema es exactamente el m
 (responde con `Idempotent-Replayed: true`). Misma clave + cuerpo distinto → 409.
 
 **Dónde.**
-- `service/IdempotentPaymentService.java`: `create` (línea 41), reclamo en la línea 45.
+- `service/IdempotentPaymentService.java`: `create` (línea 39), reclamo en la línea 42.
 - `repository/IdempotencyRepository.java:22-24`: `INSERT … ON CONFLICT DO NOTHING` (`claim`).
 - Migración `src/main/resources/db/migration/V1__create_core_schema.sql`: tabla `idempotency_keys` con la clave como PK.
 - Prueba: `src/test/java/cr/portfolio/payments/IdempotencyIntegrationTest.java`.

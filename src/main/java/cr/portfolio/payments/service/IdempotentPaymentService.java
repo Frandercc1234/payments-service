@@ -2,10 +2,7 @@ package cr.portfolio.payments.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import cr.portfolio.payments.domain.Money;
 import cr.portfolio.payments.repository.IdempotencyRepository;
-import cr.portfolio.payments.web.dto.PaymentDtos.CreatePaymentRequest;
-import cr.portfolio.payments.web.dto.PaymentDtos.PaymentResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -25,7 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class IdempotentPaymentService {
 
-    public record Result(PaymentResponse body, int status, boolean replayed) {
+    public record Result(PaymentSnapshot payment, int status, boolean replayed) {
     }
 
     private final IdempotencyRepository keys;
@@ -39,15 +36,14 @@ public class IdempotentPaymentService {
     }
 
     @Transactional
-    public Result create(String key, CreatePaymentRequest request) {
-        var hash = fingerprint(request);
+    public Result create(String key, CreatePaymentCommand command) {
+        var hash = fingerprint(command);
 
         if (keys.claim(key, hash) == 1) {
-            var payment = payments.create(request.sourceAccountId(), request.destinationAccountId(),
-                    new Money(request.amount(), request.currency()));
-            var body = PaymentResponse.from(payment);
-            keys.findById(key).orElseThrow().complete(HttpStatus.CREATED.value(), write(body));
-            return new Result(body, HttpStatus.CREATED.value(), false);
+            var payment = payments.create(command.sourceAccountId(), command.destinationAccountId(), command.amount());
+            var snapshot = PaymentSnapshot.from(payment);
+            keys.findById(key).orElseThrow().complete(HttpStatus.CREATED.value(), write(snapshot));
+            return new Result(snapshot, HttpStatus.CREATED.value(), false);
         }
 
         var existing = keys.findById(key).orElseThrow();
@@ -61,8 +57,9 @@ public class IdempotentPaymentService {
      * Huella del contenido del pago. Se calcula sobre los campos ya interpretados, no sobre el texto
      * del JSON, así que el orden de los campos o los espacios no cambian el resultado.
      */
-    private static String fingerprint(CreatePaymentRequest r) {
-        var canonical = "%s|%s|%d|%s".formatted(r.sourceAccountId(), r.destinationAccountId(), r.amount(), r.currency());
+    private static String fingerprint(CreatePaymentCommand c) {
+        var canonical = "%s|%s|%d|%s".formatted(c.sourceAccountId(), c.destinationAccountId(),
+                c.amount().cents(), c.amount().currency());
         try {
             var digest = MessageDigest.getInstance("SHA-256").digest(canonical.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(digest);
@@ -71,7 +68,7 @@ public class IdempotentPaymentService {
         }
     }
 
-    private String write(PaymentResponse body) {
+    private String write(PaymentSnapshot body) {
         try {
             return json.writeValueAsString(body);
         } catch (JsonProcessingException e) {
@@ -79,9 +76,9 @@ public class IdempotentPaymentService {
         }
     }
 
-    private PaymentResponse read(String body) {
+    private PaymentSnapshot read(String body) {
         try {
-            return json.readValue(body, PaymentResponse.class);
+            return json.readValue(body, PaymentSnapshot.class);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Respuesta guardada ilegible", e);
         }

@@ -51,13 +51,13 @@ public class PaymentController {
     public ResponseEntity<PaymentResponse> create(
             @RequestHeader("Idempotency-Key") @NotBlank @Size(max = 255) String idempotencyKey,
             @Valid @RequestBody CreatePaymentRequest request) {
-        var result = idempotentPayments.create(idempotencyKey, request);
+        var result = idempotentPayments.create(idempotencyKey, request.toCommand());
         var response = ResponseEntity.status(result.status())
-                .location(URI.create("/payments/" + result.body().id()));
+                .location(URI.create("/payments/" + result.payment().id()));
         if (result.replayed()) {
             response.header("Idempotent-Replayed", "true");
         }
-        return response.body(result.body());
+        return response.body(PaymentResponse.from(result.payment()));
     }
 
     @GetMapping("/{id}")

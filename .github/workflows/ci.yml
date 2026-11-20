@@ -41,11 +41,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Construir imagen y levantar API + PostgreSQL
-        run: docker compose up -d --build --wait --wait-timeout 180
+      - name: Construir imágenes y levantar todo el stack (PostgreSQL, RabbitMQ, API, relay, notificaciones)
+        run: docker compose up -d --build --wait --wait-timeout 420
 
-      - name: Comprobar /actuator/health
-        run: curl --fail --silent --show-error http://localhost:8080/actuator/health
+      - name: Comprobar /actuator/health de los dos servicios
+        run: |
+          curl --fail --silent --show-error http://localhost:8080/actuator/health
+          curl --fail --silent --show-error http://localhost:8081/actuator/health
+
+      - name: Prueba de humo de punta a punta (pago, outbox, RabbitMQ, notificación)
+        run: ./scripts/smoke-test.sh
 
       - name: Logs si algo falló
         if: failure()

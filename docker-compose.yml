@@ -5,17 +5,37 @@ services:
       POSTGRES_DB: payments
       POSTGRES_USER: payments
       POSTGRES_PASSWORD: ${DB_PASSWORD:-payments}
+      NOTIFICATIONS_DB_PASSWORD: ${NOTIFICATIONS_DB_PASSWORD:-notifications}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Crea la base "notifications" (con su propio usuario) la primera vez que se inicializa el volumen.
+      - ./docker/postgres/init-notifications-db.sh:/docker-entrypoint-initdb.d/init-notifications-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
       interval: 5s
       timeout: 3s
       retries: 10
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      # El usuario "guest" de RabbitMQ solo acepta conexiones desde localhost: entre contenedores hace falta otro.
+      RABBITMQ_DEFAULT_USER: payments
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-payments}
+    ports:
+      - "5672:5672"      # AMQP
+      - "15672:15672"    # consola web: http://localhost:15672
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
   api:
+    image: payments-service:dev
     build: ./payments-service
     depends_on:
       postgres:
@@ -33,6 +53,49 @@ services:
       timeout: 3s
       retries: 20
       start_period: 15s
+
+  # Proceso aparte que publica el outbox a RabbitMQ: la MISMA imagen que la API, con el perfil "relay"
+  # (sin servidor web). La API nunca habla con el broker, así que un RabbitMQ caído no afecta a los pagos.
+  outbox-relay:
+    image: payments-service:dev
+    build: ./payments-service
+    depends_on:
+      api:
+        condition: service_healthy      # la API es la dueña del esquema (Flyway): el relay espera a que exista
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
+    environment:
+      SPRING_PROFILES_ACTIVE: relay
+      DB_URL: jdbc:postgresql://postgres:5432/payments
+      DB_USER: payments
+      DB_PASSWORD: ${DB_PASSWORD:-payments}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: payments
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-payments}
+
+  notifications:
+    build: ./notifications-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/notifications
+      DB_USER: notifications
+      DB_PASSWORD: ${NOTIFICATIONS_DB_PASSWORD:-notifications}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: payments
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-payments}
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
 
 volumes:
   pgdata:

@@ -17,11 +17,14 @@ public class PaymentService {
     private final PaymentRepository payments;
     private final LedgerEntryRepository ledger;
     private final AccountLocks locks;
+    private final OutboxService outbox;
 
-    public PaymentService(PaymentRepository payments, LedgerEntryRepository ledger, AccountLocks locks) {
+    public PaymentService(PaymentRepository payments, LedgerEntryRepository ledger, AccountLocks locks,
+            OutboxService outbox) {
         this.payments = payments;
         this.ledger = ledger;
         this.locks = locks;
+        this.outbox = outbox;
     }
 
     /**
@@ -40,6 +43,7 @@ public class PaymentService {
         payments.save(payment);
         ledger.save(LedgerEntry.of(payment.getId(), sourceId, Direction.DEBIT, EntryKind.PAYMENT, money));
         ledger.save(LedgerEntry.of(payment.getId(), destinationId, Direction.CREDIT, EntryKind.PAYMENT, money));
+        outbox.record(PaymentEventType.CREATED, payment);   // misma transacción: pago y evento, los dos o ninguno
         return payment;
     }
 

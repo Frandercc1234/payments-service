@@ -18,13 +18,15 @@ public class WebhookService {
     private final WebhookEventRepository events;
     private final LedgerEntryRepository ledger;
     private final AccountLocks locks;
+    private final OutboxService outbox;
 
     public WebhookService(PaymentRepository payments, WebhookEventRepository events,
-            LedgerEntryRepository ledger, AccountLocks locks) {
+            LedgerEntryRepository ledger, AccountLocks locks, OutboxService outbox) {
         this.payments = payments;
         this.events = events;
         this.ledger = ledger;
         this.locks = locks;
+        this.outbox = outbox;
     }
 
     /**
@@ -49,9 +51,11 @@ public class WebhookService {
         // 3) Aplicar el efecto.
         if (event.type() == ProviderEventType.PAYMENT_CONFIRMED) {
             payment.transitionTo(PaymentStatus.CONFIRMED);
+            outbox.record(PaymentEventType.CONFIRMED, payment);
         } else {
             reverse(payment);
             payment.transitionTo(PaymentStatus.FAILED);
+            outbox.record(PaymentEventType.FAILED, payment);
         }
         return WebhookOutcome.PROCESSED;
     }

@@ -112,7 +112,7 @@ El secreto de desarrollo viene de `.env.example` (copiarlo a `.env` para cambiar
 
 ```bash
 cd payments-service
-./mvnw verify     # 70 pruebas; las de integración levantan PostgreSQL real con Testcontainers (requiere Docker)
+./mvnw verify     # 77 pruebas; las de integración levantan PostgreSQL real con Testcontainers (requiere Docker)
 ```
 
 | Tipo | Qué cubre |

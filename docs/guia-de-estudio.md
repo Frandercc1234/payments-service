@@ -19,6 +19,8 @@ cómo se compara con NestJS y preguntas de entrevista con respuesta.
 | `@nestjs/config` | `application.yml` + `@ConfigurationProperties` | configuración |
 | `Test.createTestingModule` + supertest | `@SpringBootTest` + `TestRestTemplate` | pruebas de integración |
 | `package.json` + npm | `pom.xml` + Maven (`mvnw`) | dependencias y build |
+| `@nestjs/microservices` (`Transport.RMQ`, `ClientProxy`, `@EventPattern`) | `spring-boot-starter-amqp` (`RabbitTemplate`, `@RabbitListener`) | mensajería con RabbitMQ |
+| `@nestjs/schedule` (`@Cron`, `@Interval`) | `@Scheduled` + `@EnableScheduling` | tareas periódicas |
 
 Diferencia de fondo: Nest corre en un solo hilo de Node con `async/await`; Spring (Tomcat) usa **un hilo por petición**,
 con código bloqueante. Por eso aquí la concurrencia real (varios hilos tocando la misma fila) es un problema central y en Node
@@ -301,6 +303,143 @@ aplicación (como `Test.createTestingModule(...).compile()` + `app.init()`), y `
 
 ---
 
+> **Ampliación de la sección 9 (Testcontainers).** Las pruebas de mensajería usan además un RabbitMQ real:
+> `src/test/java/cr/portfolio/payments/AbstractRabbitIntegrationTest.java` (mismo patrón de contenedor único y `@DynamicPropertySource`) y
+> `notifications-service/src/test/java/cr/portfolio/notifications/AbstractIntegrationTest.java` (PostgreSQL + RabbitMQ). Como el consumo es
+> asíncrono, las pruebas esperan con **Awaitility** (`await().untilAsserted(...)`) en lugar de `Thread.sleep` a ciegas. Una trampa que me
+> encontré: una cola `autoDelete` se borra cuando se cancela el consumidor de `receive(queue, timeout)`, así que el segundo `receive` fallaba.
+
+## 10. Outbox transaccional
+
+**Qué hace.** Resuelve el problema de la **doble escritura**: "guardar el pago" y "avisar al otro servicio" son dos sistemas distintos (PostgreSQL y
+RabbitMQ) y no existe una transacción que abarque a ambos. Si guardás y después publicás, una caída entre los dos pasos pierde el evento; si publicás
+y después guardás, podés avisar de un pago que nunca existió. La solución: el evento se **escribe como una fila** en la tabla `outbox_events`, en la
+**misma transacción** que el pago. Un proceso aparte (el relay) lee esas filas y las publica.
+
+**Dónde.**
+- `src/main/resources/db/migration/V2__create_outbox.sql`: la tabla y un índice parcial solo sobre las filas pendientes.
+- `domain/OutboxEvent.java`, `repository/OutboxEventRepository.java`.
+- `service/OutboxService.java`: `record(...)`, con `Propagation.MANDATORY` (exige una transacción abierta).
+- Se llama desde `service/PaymentService.java` (creación) y `service/WebhookService.java` (confirmado/fallido, solo cuando el evento no es un duplicado).
+- Pruebas: `src/test/java/cr/portfolio/payments/OutboxIntegrationTest.java`.
+
+**Cómo se compara con NestJS.** `ClientProxy.emit()` de `@nestjs/microservices` publica directo al broker: es justamente la doble escritura que el outbox evita.
+En Nest lo harías con TypeORM guardando pago y evento con el mismo `manager` dentro de `dataSource.transaction(...)`, más un `@Cron`/`@Interval` (o una cola como Bull)
+que publique. Spring no trae el patrón hecho: es una tabla, un servicio y un proceso.
+
+**Preguntas de entrevista.**
+1. *¿Por qué no publicás a RabbitMQ directamente dentro de `POST /payments`?*
+   Porque la base y el broker no comparten transacción. Si publico antes del commit y el commit falla, aviso de un pago que no existe; si publico después y la
+   aplicación muere entre ambos pasos, el pago existe y nadie se entera. Con el outbox, el evento y el pago se confirman o se deshacen juntos.
+2. *¿Cómo demostraste que el evento y el pago son atómicos?*
+   Con una prueba (`ifTheEventCannotBeWrittenThePaymentRollsBackToo`) que crea un *trigger* en PostgreSQL que hace fallar el `INSERT` del outbox para una cuenta concreta:
+   el `POST /payments` responde 500 y los saldos y la tabla de pagos quedan intactos. La dirección contraria (un pago rechazado no deja evento) también tiene prueba.
+3. *¿Qué garantía da y cuál no?*
+   Garantiza que **todo cambio confirmado genera su evento**, pero la entrega es **al menos una vez**, no exactamente una: el evento puede publicarse dos veces. Por eso
+   el consumidor tiene que ser idempotente (sección 12).
+4. *¿Por qué `Propagation.MANDATORY` en `OutboxService`?*
+   Si alguien lo llamara sin transacción, el evento se guardaría aunque el pago después fallara: se rompería exactamente la garantía. Prefiero que falle con ruido.
+
+---
+
+## 11. El relay y la publicación fiable a RabbitMQ
+
+**Qué hace.** Cada 500 ms lee los eventos pendientes del outbox, los publica a RabbitMQ y, **solo cuando el broker confirma**, los marca como publicados.
+Corre como un proceso aparte: el mismo código que la API pero con el perfil `relay` (sin servidor web).
+
+**Dónde.**
+- `service/OutboxPublisher.java`: `publishPending()` (un lote) y el envío con confirmación.
+- `service/OutboxRelayRunner.java`: el `@Scheduled`, que solo existe si `app.outbox.relay.enabled=true`.
+- `src/main/resources/application-relay.yml`: el perfil `relay` (sin web, sin Flyway, relay activado).
+- `repository/OutboxEventRepository.java`: `lockPending` con `FOR UPDATE SKIP LOCKED`.
+- `config/RabbitConfig.java` y `config/OutboxProperties.java`.
+- Pruebas: `OutboxRelayIntegrationTest` (RabbitMQ real) y `service/OutboxPublisherTest` (Mockito).
+
+**Cómo se compara con NestJS.** `@Scheduled(fixedDelay…)` ≈ `@Interval()` de `@nestjs/schedule`; `RabbitTemplate` ≈ el `ClientProxy` del transporte RMQ.
+Los **perfiles** de Spring (`SPRING_PROFILES_ACTIVE=relay`) cargan un `application-relay.yml` adicional: es como tener otro `.env` por modo de ejecución.
+
+**Preguntas de entrevista.**
+1. *¿Qué son las confirmaciones del publicador (*publisher confirms*) y `mandatory`?*
+   Sin ellas, publicar es "dispararlo y olvidarlo": el broker puede no haberlo recibido o no haberlo enrutado a ninguna cola. Con confirmaciones el broker responde ack/nack por mensaje.
+   Con `mandatory=true` devuelve el mensaje si ninguna cola lo recibió. El relay trata el nack, la devolución y el silencio (timeout) como fallo: el evento queda pendiente y se reintenta.
+   Eso evita perder eventos si el consumidor todavía no creó su cola (lo verifiqué en las pruebas y deteniendo RabbitMQ en el stack real).
+2. *¿Qué hace `FOR UPDATE SKIP LOCKED` y qué prueba lo respalda?*
+   Cada relay toma un lote de filas pendientes y las bloquea; otro relay salta las filas bloqueadas en vez de esperarlas o repetirlas. La prueba de dos relays simultáneos exige que cada
+   evento salga una sola vez. Hice una mutación quitando el bloqueo y esa prueba falla. Ojo: lo que esa prueba detecta es la **falta de bloqueo**; la ventaja de `SKIP LOCKED` sobre un `FOR UPDATE` simple es que no espera.
+3. *¿Qué pasa si el relay muere después de publicar y antes de marcar la fila?*
+   La fila sigue pendiente y se publica de nuevo: el consumidor recibirá un duplicado. Es el costo de "al menos una vez", y por eso el consumidor deduplica.
+4. *¿Por qué el relay se detiene en el primer fallo de un lote?*
+   Para no reordenar: si saltara el evento fallido y siguiera, un evento posterior saldría antes que uno anterior.
+5. *¿Por qué la API nunca se conecta al broker?*
+   Para que un RabbitMQ caído no afecte a los pagos. Lo comprobé en el stack real: con el broker detenido `POST /payments` respondió 201 y el evento se entregó al volver.
+
+---
+
+## 12. Consumidor idempotente, reintentos y cola de mensajes muertos (DLQ)
+
+**Qué hace.** `notifications-service` consume los eventos y crea una notificación (simulada) por cada uno, **sin duplicar aunque el mensaje llegue varias veces**.
+Lo logra reclamando el `messageId` y creando la notificación en **una sola transacción**, y confirmando (ack) al broker **después** del commit. Los mensajes que
+nunca podrán procesarse van a una DLQ en lugar de reintentarse para siempre.
+
+**Dónde** (todo en `notifications-service/src/main/java/cr/portfolio/notifications/`).
+- `messaging/PaymentEventListener.java`: `@RabbitListener`; rechaza sin reencolar los mensajes imposibles.
+- `service/NotificationService.java`: `process(...)`, idempotente.
+- `repository/ProcessedMessageRepository.java`: `claim(...)` con `INSERT … ON CONFLICT DO NOTHING`.
+- `config/RabbitTopology.java`: la cola, la DLQ y los enlaces. `src/main/resources/application.yml`: concurrencia y reintentos.
+- Migración `V1__create_notifications_schema.sql` (`processed_messages` y `notifications` con `UNIQUE(message_id)`).
+- Pruebas: `NotificationConsumerIntegrationTest`.
+
+**Cómo se compara con NestJS.** `@RabbitListener(queues=…)` ≈ `@EventPattern()`/`@MessagePattern()` con `Transport.RMQ`. El ack manual de Nest (`noAck: false` y
+`context.getChannelRef().ack(...)`) lo hace Spring por vos: confirma cuando el método termina sin excepción. La DLQ se configura con los argumentos `x-dead-letter-exchange`
+de la cola, igual en ambos. El patrón "reclamar el id y crear el efecto en una transacción" en Nest lo harías con TypeORM dentro de `dataSource.transaction`.
+
+**Preguntas de entrevista.**
+1. *¿Confirmás (ack) antes o después de procesar? ¿Por qué?*
+   Después del commit. Si confirmara antes y el proceso muriera, el mensaje se perdería. Si el proceso muere entre el commit y el ack, el broker lo reentrega y el `messageId` ya
+   reclamado lo descarta. Ese es el motivo de que las dos cosas (reclamar y crear la notificación) vayan en la misma transacción.
+2. *Tenés 3 consumidores y llegan 10 copias del mismo mensaje a la vez. ¿Cómo se evita notificar 10 veces?*
+   Todos hacen `INSERT … ON CONFLICT DO NOTHING` sobre `processed_messages`. PostgreSQL deja pasar a uno y hace esperar a los demás hasta que termine; cuando confirma, los demás
+   reciben 0 filas y salen sin hacer nada. Hay una prueba con diez copias y tres consumidores; además comprueba que los duplicados **no** terminan en la DLQ (un duplicado es normal, no un error),
+   y una mutación que rompe ese chequeo hace fallar las pruebas.
+3. *¿Qué es una DLQ y qué NO resuelve?*
+   Es la cola a la que van los mensajes rechazados o que agotaron sus reintentos, para inspeccionarlos sin bloquear el resto. No los reprocesa sola: aquí se revisan a mano desde la
+   consola de RabbitMQ. Además los reintentos actuales no distinguen errores: un mensaje con JSON ilegible también se reintenta 3 veces antes de llegar a la DLQ (está en "Límites").
+4. *Si falla la base al crear la notificación, ¿queda el mensaje marcado como procesado?*
+   No: la reclamación y la notificación comparten transacción, así que el rollback deshace ambas. Está probado con un trigger que hace fallar el insert: el mensaje va a la DLQ, no queda
+   fila en `processed_messages`, y al reentregarlo después se procesa normalmente.
+5. *¿Por qué el listener recibe un `Message` en bruto y no un objeto?*
+   Para controlar yo mismo qué es "mensaje imposible" (JSON ilegible, versión desconocida, sin `messageId`) y rechazarlo sin reencolar, en lugar de depender de un conversor automático.
+
+---
+
+## 13. Dos servicios: contrato, una base por servicio y Docker Compose
+
+**Qué hace.** Son dos aplicaciones independientes con sus propias bases de datos, que solo comparten el **contrato del evento** (el JSON versionado).
+
+**Dónde.**
+- `docker-compose.yml`: PostgreSQL, RabbitMQ, API, relay y notificaciones, con *healthchecks* y `depends_on` con `condition: service_healthy`.
+- `docker/postgres/init-notifications-db.sh`: crea la base y el usuario de `notifications` la primera vez que se inicializa el volumen.
+- `payments-service/…/service/PaymentEvent.java` (el contrato que se publica) y `notifications-service/…/messaging/PaymentEvent.java` (la copia del consumidor).
+- `scripts/smoke-test.sh` y el job `docker-image` de `.github/workflows/ci.yml`.
+
+**Cómo se compara con NestJS.** En un monorepo de Nest es común una librería compartida (`libs/`) con los DTO. Aquí no hay código compartido a propósito.
+
+**Preguntas de entrevista.**
+1. *¿Por qué no compartir una librería con el DTO del evento?*
+   Acopla los servicios al compilar y al desplegar: un cambio obliga a recompilar y desplegar ambos a la vez, que es lo que los microservicios intentan evitar. Cada servicio tiene su copia del
+   contrato; el consumidor ignora campos desconocidos (*tolerant reader*) y rechaza una `version` que no entiende. El costo: no hay pruebas de contrato automáticas (está en "Límites").
+2. *¿Por qué una base de datos por servicio?*
+   Si compartieran tablas, cualquier cambio de esquema rompería al otro servicio y el "acoplamiento por base de datos" anularía la independencia. Aquí son dos bases (y dos usuarios) en la misma instancia
+   de PostgreSQL: independientes lógicamente, baratas de operar.
+3. *¿En qué orden arranca el sistema y qué pasa si algo no está listo?*
+   Compose espera con *healthchecks*: PostgreSQL y RabbitMQ primero, luego la API (dueña del esquema `payments`), luego el relay y las notificaciones. Si el consumidor tarda en crear su cola, el relay
+   no pierde eventos (`mandatory`): quedan pendientes. Lo comprobé deteniendo RabbitMQ con el sistema corriendo.
+4. *¿Cómo sabés que todo funciona junto?*
+   `scripts/smoke-test.sh`: crea un pago, espera `payment.created`, confirma con un webhook firmado, espera `payment.confirmed`, reenvía el webhook y verifica que no aparece una tercera notificación.
+   Corre en cada push en GitHub Actions.
+
+---
+
 ## Piezas complementarias
 
 - **Libro mayor de doble entrada** (`domain/LedgerEntry.java`, tabla `ledger_entries`): cada pago escribe un débito y un crédito; una
@@ -313,5 +452,8 @@ aplicación (como `Test.createTestingModule(...).compile()` + `app.init()`), y `
 ## Cómo estudiarlo (sugerencia)
 
 1. Corré `./mvnw verify` y mirá qué prueba corresponde a cada sección de esta guía.
-2. Rompé algo a propósito (quitá `@Lock`, quitá `ON CONFLICT`, cambiá `isEqual` por `equals`) y observá qué prueba falla.
+2. Rompé algo a propósito (quitá `@Lock`, quitá `ON CONFLICT`, cambiá `isEqual` por `equals`, quitá `FOR UPDATE SKIP LOCKED` del relay,
+   cambiá `claim(messageId) == 0` en `NotificationService`) y observá qué prueba falla.
 3. Explicá en voz alta el recorrido de `POST /payments` desde el controlador hasta el commit, mencionando la transacción y el bloqueo.
+4. Seguí un evento de punta a punta: fila del outbox → relay → confirmación del broker → consumidor → notificación. Para cada flecha, respondé: ¿qué pasa si el proceso muere justo aquí?
+5. Detené RabbitMQ con `docker compose stop rabbitmq`, creá un pago y mirá `outbox_events` (queda 1 pendiente); iniciá el broker y mirá cómo se entrega.

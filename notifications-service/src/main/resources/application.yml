@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: notifications-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/notifications}
+    username: ${DB_USER:notifications}
+    password: ${DB_PASSWORD:notifications}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate        # Flyway crea el esquema; Hibernate solo lo verifica
+  flyway:
+    enabled: true
+  mvc:
+    problemdetails:
+      enabled: true             # errores de Spring MVC como application/problem+json (RFC 7807)
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        concurrency: 3                  # varios consumidores en paralelo: los duplicados pueden chocar entre sí
+        max-concurrency: 3
+        default-requeue-rejected: false # un mensaje rechazado va a la DLQ, no vuelve a la cola en bucle
+        retry:
+          enabled: true                 # reintentos acotados antes de rendirse y mandarlo a la DLQ
+          max-attempts: 3
+          initial-interval: 500ms
+          multiplier: 2.0
+
+app:
+  events:
+    exchange: payments.events
+
+server:
+  port: 8080

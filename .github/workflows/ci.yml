@@ -6,8 +6,12 @@ on:
 
 jobs:
   build-and-test:
-    name: Build y pruebas
+    name: Build y pruebas (${{ matrix.service }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [payments-service, notifications-service]
     steps:
       - uses: actions/checkout@v7
 
@@ -16,19 +20,19 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-          cache-dependency-path: payments-service/pom.xml
+          cache-dependency-path: ${{ matrix.service }}/pom.xml
 
-      # Testcontainers usa el Docker que ya trae el runner de GitHub: PostgreSQL real, no un mock.
+      # Testcontainers usa el Docker que ya trae el runner de GitHub: PostgreSQL y RabbitMQ reales, no mocks.
       - name: Compilar y correr pruebas
-        working-directory: payments-service
+        working-directory: ${{ matrix.service }}
         run: ./mvnw -B verify
 
       - name: Subir reportes de pruebas si fallan
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: surefire-reports
-          path: payments-service/target/surefire-reports
+          name: surefire-reports-${{ matrix.service }}
+          path: ${{ matrix.service }}/target/surefire-reports
 
   docker-image:
     name: Imagen Docker y arranque con Compose

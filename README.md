@@ -205,6 +205,8 @@ cd payments-service && ./mvnw verify        # 87 pruebas (PostgreSQL y RabbitMQ 
 cd notifications-service && ./mvnw verify   # 9 pruebas (PostgreSQL y RabbitMQ reales)
 ```
 
+**Total: 96 pruebas** (87 de payments-service y 9 de notifications-service).
+
 | Tipo | Qué cubre |
 |---|---|
 | Unitarias de dominio | estados válidos/inválidos, montos positivos, saldo insuficiente, moneda distinta, desbordamiento de `long` |
@@ -349,7 +351,6 @@ Esto es un **proyecto de portafolio**, no un sistema listo para producción. Sin
 - **Configuración de desarrollo:** `docker-compose.yml` expone PostgreSQL y RabbitMQ con contraseñas por defecto y el secreto del webhook tiene un valor de desarrollo. No usar así fuera de una máquina local.
 - **Versión de Spring Boot:** el proyecto usa Spring Boot **3.5.16**, la última línea 3.x, tal como se pidió. Spring Initializr ya solo ofrece la línea 4.x, así que migrar es el siguiente paso natural.
 - **No hay listados ni paginación**, ni historial de cuentas, ni endpoint para consultar el ledger (se verifica en las pruebas con SQL).
-- Los tres diagramas Mermaid los compilé y revisé a ojo con Mermaid 11 fuera de GitHub (sin errores de sintaxis); en la página de GitHub se generan sus contenedores sin mensaje de error, pero no vi allí el dibujo final.
 
 ## Estructura
 

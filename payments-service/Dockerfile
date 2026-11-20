@@ -6,7 +6,15 @@ WORKDIR /workspace
 # no cambie, no vuelve a descargar medio internet en cada build.
 COPY .mvn .mvn
 COPY mvnw pom.xml ./
-RUN chmod +x mvnw && ./mvnw -B -q dependency:go-offline
+# Reintentos: la primera llamada a mvnw descarga Maven y las dependencias; un 404/timeout pasajero del
+# servidor de descargas no debe tumbar el build. Pausa creciente entre intentos (5 s, 10 s, ... 25 s).
+RUN chmod +x mvnw && \
+    for i in 1 2 3 4 5; do \
+      ./mvnw -B -q dependency:go-offline && exit 0; \
+      echo "Descarga fallida (intento $i de 5), reintentando..." >&2; \
+      sleep $((i * 5)); \
+    done; \
+    exit 1
 
 COPY src src
 # Las pruebas corren en CI (necesitan Docker para Testcontainers, que no existe dentro de este build).

@@ -220,4 +220,5 @@ src/main/java/cr/portfolio/payments/
   config/       propiedades del webhook y OpenAPI
 src/main/resources/db/migration/   migraciones Flyway
 src/test/java/…                    pruebas unitarias y de integración (Testcontainers)
+docs/guia-de-estudio.md            guía para entender y explicar cada pieza (con comparación con NestJS)
 ```

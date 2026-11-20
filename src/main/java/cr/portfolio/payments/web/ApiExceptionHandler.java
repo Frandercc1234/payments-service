@@ -10,6 +10,8 @@ import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -29,6 +31,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 @RestControllerAdvice
 public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
     private static final String TYPE_PREFIX = "urn:payments:problem:";
 
     @ExceptionHandler(ResourceNotFoundException.class)
@@ -69,6 +72,17 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     ProblemDetail illegalArgument(IllegalArgumentException ex) {
         return problem(HttpStatus.BAD_REQUEST, "invalid-request", "Solicitud inválida", ex.getMessage());
+    }
+
+    /**
+     * Red de seguridad. El detalle real (stack trace, mensaje de la base de datos) va al log y NUNCA
+     * a la respuesta: un error SQL puede revelar nombres de tablas, constraints o datos.
+     */
+    @ExceptionHandler(Exception.class)
+    ProblemDetail unexpected(Exception ex) {
+        log.error("Error no controlado", ex);
+        return problem(HttpStatus.INTERNAL_SERVER_ERROR, "internal-error", "Error interno",
+                "Ocurrió un error inesperado. Intentá de nuevo más tarde.");
     }
 
     @Override

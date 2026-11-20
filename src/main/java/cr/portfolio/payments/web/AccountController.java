@@ -3,6 +3,7 @@ package cr.portfolio.payments.web;
 import cr.portfolio.payments.service.AccountService;
 import cr.portfolio.payments.web.dto.AccountDtos.AccountResponse;
 import cr.portfolio.payments.web.dto.AccountDtos.CreateAccountRequest;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.UUID;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+@Tag(name = "Cuentas")
 @RestController
 @RequestMapping("/accounts")
 public class AccountController {
